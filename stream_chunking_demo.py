@@ -1,6 +1,7 @@
 """Demo for stream_with_chunking: two scenarios showcasing code-based quick checks."""
 
 import asyncio
+import re
 
 from mellea.backends import ModelOption
 from mellea.backends.ollama import OllamaModelBackend
@@ -93,11 +94,47 @@ async def demo_fail_fast(backend: OllamaModelBackend) -> None:
     print_result(result)
 
 
+async def demo_repair(backend: OllamaModelBackend) -> None:
+    print_header("Demo 3: Repair — callback strips digits from failing chunks")
+
+    instruction = Instruction(
+        description="List 5 fun facts about space. Number each fact starting with the digit (e.g. 1. ...)",
+    )
+
+    quick_checks = [
+        Requirement(
+            "Sentence must not contain a digit.",
+            simple_validate(lambda x: not any(c.isdigit() for c in x)),
+            check_only=True,
+        ),
+    ]
+
+    async def repair_digits(chunk, results, stream_result):
+        repaired = re.sub(r"\d+\.\s*", "", chunk)
+        print(f"  [repair] stripped digits: {chunk.strip()[:40]!r} -> {repaired.strip()[:40]!r}")
+        return repaired
+
+    result = await stream_with_chunking(
+        instruction,
+        backend,
+        quick_check_requirements=quick_checks,
+        chunking_mode=ChunkingMode.SENTENCE,
+        on_chunk_failure=repair_digits,
+    )
+
+    async for chunk in result.astream():
+        print(f"  [chunk] {chunk.strip()}", flush=True)
+
+
+    print_result(result)
+
+
 async def main() -> None:
     backend = OllamaModelBackend(model_options={ModelOption.STREAM: True})
 
     await demo_happy_path(backend)
     await demo_fail_fast(backend)
+    await demo_repair(backend)
 
 
 if __name__ == "__main__":

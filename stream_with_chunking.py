@@ -8,7 +8,7 @@ Two-phase validation:
 import asyncio
 import enum
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Awaitable
 from dataclasses import dataclass, field
 
 from mellea.core.backend import Backend
@@ -19,6 +19,12 @@ from mellea.stdlib.context import SimpleContext
 from mellea.stdlib.functional import avalidate
 
 
+OnChunkFailure = Callable[
+    [str, list["ValidationResult"], "StreamChunkingResult"],
+    Awaitable[str | None],
+]
+
+
 class ChunkingMode(enum.Enum):
     SENTENCE = "sentence"
     WORD = "word"
@@ -26,7 +32,7 @@ class ChunkingMode(enum.Enum):
 
 
 _SPLIT_PATTERNS: dict[ChunkingMode, re.Pattern[str]] = {
-    ChunkingMode.SENTENCE: re.compile(r"(?<=[.!?])\s+"),
+    ChunkingMode.SENTENCE: re.compile(r"(?<=[.!?])(?=\s+)"),
     ChunkingMode.WORD: re.compile(r"\s+"),
     ChunkingMode.PARAGRAPH: re.compile(r"\n\n+"),
 }
@@ -77,11 +83,12 @@ async def _validate_chunk(
     qc_reqs: list[Requirement | str],
     backend: Backend,
     result: StreamChunkingResult,
-) -> bool:
-    """Validate a single chunk. Returns True if passed, False if failed."""
+    on_failure: OnChunkFailure | None = None,
+) -> tuple[bool, str]:
+    """Validate a single chunk. Returns (passed, chunk_text)."""
     if not chunk.strip():
         result.quick_check_results.append([])
-        return True
+        return True, chunk
 
     validation_ctx = SimpleContext()
     chunk_results = await avalidate(
@@ -90,10 +97,14 @@ async def _validate_chunk(
     result.quick_check_results.append(chunk_results)
 
     if not all(chunk_results):
+        if on_failure is not None:
+            repaired = await on_failure(chunk, chunk_results, result)
+            if repaired is not None:
+                return True, repaired
         result.failed_chunk = chunk
-        return False
+        return False, chunk
 
-    return True
+    return True, chunk
 
 
 async def stream_with_chunking(
@@ -103,6 +114,7 @@ async def stream_with_chunking(
     quick_check_requirements: list[Requirement | str] | None = None,
     chunking_mode: ChunkingMode = ChunkingMode.SENTENCE,
     model_options: dict | None = None,
+    on_chunk_failure: OnChunkFailure | None = None,
 ) -> StreamChunkingResult:
     """Stream LLM output, validating chunks against quick-check requirements.
 
@@ -132,28 +144,32 @@ async def stream_with_chunking(
                 buffer = parts[-1]
 
                 for chunk in parts[:-1]:
-                    if qc_reqs and not await _validate_chunk(chunk, qc_reqs, backend, result):
-                        result.completed = False
-                        _cancel_thunk(thunk)
-                        return
+                    if qc_reqs:
+                        passed, chunk = await _validate_chunk(chunk, qc_reqs, backend, result, on_chunk_failure)
+                        if not passed:
+                            result.completed = False
+                            _cancel_thunk(thunk)
+                            return
                     result.validated_chunks.append(chunk)
                     await result._chunk_queue.put(chunk)
 
-            # Stream finished — get final text
-            result.full_text = await thunk.avalue()
+
 
             # Validate remaining buffer from final text
             final_parts = pattern.split(result.full_text)
             already_done = len(result.validated_chunks)
             for i in range(already_done, len(final_parts)):
                 chunk = final_parts[i]
-                if qc_reqs and not await _validate_chunk(chunk, qc_reqs, backend, result):
-                    result.completed = False
-                    _cancel_thunk(thunk)
-                    return
+                if qc_reqs:
+                    passed, chunk = await _validate_chunk(chunk, qc_reqs, backend, result, on_chunk_failure)
+                    if not passed:
+                        result.completed = False
+                        _cancel_thunk(thunk)
+                        return
                 result.validated_chunks.append(chunk)
                 await result._chunk_queue.put(chunk)
 
+            result.full_text = "".join(result.validated_chunks)
             result.completed = True
 
             # Phase 2: full-output validation against instruction requirements
