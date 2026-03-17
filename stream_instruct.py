@@ -24,7 +24,13 @@ from mellea.stdlib.functional import avalidate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 from mellea.stdlib.sampling.base import BaseSamplingStrategy
 
-from stream_with_chunking import ChunkingMode, OnChunkFailure, _SPLIT_PATTERNS
+from stream_with_chunking import (
+    ChunkingMode,
+    ChunkingStrategy,
+    ChunkRepair,
+    RegexChunking,
+    _SPLIT_PATTERNS,
+)
 
 if TYPE_CHECKING:
     from mellea.stdlib.session import MelleaSession
@@ -190,7 +196,8 @@ async def _validate_and_emit_chunk(
     backend: Backend,
     attempt_rec: AttemptRecord,
     result: StreamInstructResult,
-    on_chunk_failure: OnChunkFailure | None,
+    repair: ChunkRepair | None,
+    ctx: object,
 ) -> tuple[bool, str]:
     """Validate *chunk* against quick-check requirements and emit the appropriate events.
 
@@ -217,11 +224,9 @@ async def _validate_and_emit_chunk(
     )
 
     if not passed:
-        if on_chunk_failure is not None:
-            # on_chunk_failure signature matches stream_with_chunking.OnChunkFailure;
-            # we pass self (StreamInstructResult) as the third arg — duck-typed at runtime.
-            repaired = await on_chunk_failure(chunk, chunk_results, result)  # type: ignore[arg-type]
-            if repaired is not None:
+        if repair is not None:
+            should_continue, repaired = await repair(chunk, ctx, qc_reqs, chunk_results)
+            if should_continue:
                 await result._event_queue.put(
                     ChunkRepairedEvent(
                         chunk_index=chunk_index,
@@ -245,15 +250,15 @@ async def _run(
     backend: Backend,
     strategy: BaseSamplingStrategy | None,
     qc_reqs: list[Requirement | str],
-    chunking_mode: ChunkingMode,
-    on_chunk_failure: OnChunkFailure | None,
+    chunking: ChunkingMode | ChunkingStrategy,
+    repair: ChunkRepair | None,
     model_options: dict | None,
     initial_context: object,
     session: "MelleaSession",
 ) -> None:
     """Background coroutine that drives streaming, chunking, quick checks, and retries."""
     loop_budget = strategy.loop_budget if strategy is not None else 1
-    pattern = _SPLIT_PATTERNS[chunking_mode]
+    chunker = RegexChunking(chunking) if isinstance(chunking, ChunkingMode) else chunking
 
     # Determine requirements for full-output validation.
     if strategy is not None:
@@ -296,14 +301,14 @@ async def _run(
                 delta = await thunk.astream()
                 attempt_rec.full_text += delta
                 buffer += delta
-                parts = pattern.split(buffer)
+                parts = chunker.split(buffer)
                 buffer = parts[-1]
 
                 for chunk in parts[:-1]:
                     if qc_reqs:
                         passed, chunk = await _validate_and_emit_chunk(
                             chunk, chunk_index, attempt_idx, qc_reqs,
-                            backend, attempt_rec, result, on_chunk_failure,
+                            backend, attempt_rec, result, repair, next_context,
                         )
                         if not passed:
                             quick_check_failed = True
@@ -320,14 +325,14 @@ async def _run(
 
             if not quick_check_failed:
                 # Process any remaining buffer using the final full text.
-                final_parts = pattern.split(attempt_rec.full_text)
+                final_parts = chunker.split(attempt_rec.full_text)
                 already_done = len(attempt_rec.validated_chunks)
                 for i in range(already_done, len(final_parts)):
                     chunk = final_parts[i]
                     if qc_reqs:
                         passed, chunk = await _validate_and_emit_chunk(
                             chunk, chunk_index, attempt_idx, qc_reqs,
-                            backend, attempt_rec, result, on_chunk_failure,
+                            backend, attempt_rec, result, repair, next_context,
                         )
                         if not passed:
                             quick_check_failed = True
@@ -463,8 +468,8 @@ async def stream_instruct(
     output_prefix=None,
     images=None,
     strategy: BaseSamplingStrategy | None = None,
-    chunking_mode: ChunkingMode = ChunkingMode.SENTENCE,
-    on_chunk_failure: OnChunkFailure | None = None,
+    chunking: ChunkingMode | ChunkingStrategy = ChunkingMode.SENTENCE,
+    repair: ChunkRepair | None = None,
     model_options: dict | None = None,
 ) -> StreamInstructResult:
     """Stream LLM output with per-chunk quick checks and optional sampling strategies.
@@ -488,8 +493,8 @@ async def stream_instruct(
         images: Images passed to the instruction.
         strategy: Sampling strategy for retry/repair loops.  ``None`` means a single
             attempt with no full-output validation.
-        chunking_mode: How to split the stream into chunks.
-        on_chunk_failure: Optional callback invoked when a chunk fails quick checks.
+        chunking: How to split the stream into chunks (ChunkingMode enum or ChunkingStrategy).
+        repair: Optional callback invoked when a chunk fails quick checks.
         model_options: Extra model options forwarded to the backend.
 
     Returns:
@@ -515,8 +520,8 @@ async def stream_instruct(
             backend=session.backend,
             strategy=strategy,
             qc_reqs=qc_reqs,
-            chunking_mode=chunking_mode,
-            on_chunk_failure=on_chunk_failure,
+            chunking=chunking,
+            repair=repair,
             model_options=model_options,
             initial_context=session.ctx,
             session=session,

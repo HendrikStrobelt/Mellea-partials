@@ -31,7 +31,7 @@ from stream_instruct import (
     StreamingDoneEvent,
     StreamInstructResult,
 )
-from stream_with_chunking import ChunkingMode
+from stream_with_chunking import ChunkingMode, ChunkingStrategy
 
 
 # ─── StreamingMockBackend ────────────────────────────────────────────────────
@@ -206,15 +206,15 @@ async def test_quick_check_fail_stops_streaming():
 
 @pytest.mark.asyncio
 async def test_chunk_repair_callback():
-    """on_chunk_failure repairs a failing chunk; ChunkRepairedEvent and fixed ChunkEvent are emitted."""
-    async def strip_digits(chunk: str, results, stream_result) -> str:
-        return re.sub(r"\d+", "", chunk)
+    """repair repairs a failing chunk; ChunkRepairedEvent and fixed ChunkEvent are emitted."""
+    async def strip_digits(chunk, ctx, qc_reqs, results):
+        return (True, re.sub(r"\d+", "", chunk))
 
     m = session_with(["Hello 1 world. Foo bar."])
     result = await m.stream_instruct(
         "Say something.",
         quick_check_requirements=[no_digit_req()],
-        on_chunk_failure=strip_digits,
+        repair=strip_digits,
     )
 
     events = await collect_events(result)
@@ -374,7 +374,7 @@ async def test_chunking_modes():
     m_word = session_with(["Hello world foo bar"])
     result_word = await m_word.stream_instruct(
         "Say words.",
-        chunking_mode=ChunkingMode.WORD,
+        chunking=ChunkingMode.WORD,
     )
     await result_word.acomplete()
 
@@ -387,7 +387,7 @@ async def test_chunking_modes():
     m_para = session_with(["First paragraph.\n\nSecond paragraph."])
     result_para = await m_para.stream_instruct(
         "Say paragraphs.",
-        chunking_mode=ChunkingMode.PARAGRAPH,
+        chunking=ChunkingMode.PARAGRAPH,
     )
     await result_para.acomplete()
 
@@ -395,3 +395,48 @@ async def test_chunking_modes():
     assert len(para_chunks) >= 2
     assert any("First paragraph" in c for c in para_chunks)
     assert any("Second paragraph" in c for c in para_chunks)
+
+
+@pytest.mark.asyncio
+async def test_chunk_repair_returns_false_stops_streaming():
+    """repair returning (False, text) stops streaming; CompletedEvent(success=False)."""
+    async def reject_chunk(chunk, ctx, qc_reqs, results):
+        return (False, chunk)
+
+    m = session_with(["Hello 1 world. Foo bar."])
+    result = await m.stream_instruct(
+        "Say something.",
+        quick_check_requirements=[no_digit_req()],
+        repair=reject_chunk,
+    )
+
+    events = await collect_events(result)
+
+    completed = next(e for e in events if isinstance(e, CompletedEvent))
+    assert completed.success is False
+
+    # No ChunkRepairedEvent since repair returned False
+    assert not any(isinstance(e, ChunkRepairedEvent) for e in events)
+    # No StreamingDoneEvent since streaming was stopped
+    assert not any(isinstance(e, StreamingDoneEvent) for e in events)
+
+
+@pytest.mark.asyncio
+async def test_custom_chunking_strategy():
+    """A custom ChunkingStrategy subclass is accepted and used for splitting."""
+    class CommaChunking(ChunkingStrategy):
+        def split(self, text: str) -> list[str]:
+            return text.split(",")
+
+    m = session_with(["first,second,third"])
+    result = await m.stream_instruct(
+        "Say something.",
+        chunking=CommaChunking(),
+    )
+    await result.acomplete()
+
+    assert result.success is True
+    chunks = [c for c in result.attempts[0].validated_chunks if c.strip()]
+    assert len(chunks) >= 2
+    assert any("first" in c for c in chunks)
+    assert any("second" in c for c in chunks)

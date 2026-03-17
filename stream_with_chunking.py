@@ -7,6 +7,7 @@ Two-phase validation:
 
 from __future__ import annotations
 
+import abc
 import asyncio
 import enum
 import re
@@ -52,10 +53,15 @@ class StreamChunkingResult:
             await self._task
         return self
 
+    @property
+    def as_thunk(self) -> ModelOutputThunk:
+        """Return a computed ModelOutputThunk wrapping the full validated text."""
+        return ModelOutputThunk(self.full_text)
 
-OnChunkFailure = Callable[
-    [str, list[ValidationResult], StreamChunkingResult],
-    Awaitable[str | None],
+
+ChunkRepair = Callable[
+    [str, Context, list[Requirement | str], list[ValidationResult]],
+    Awaitable[tuple[bool, str]],
 ]
 
 
@@ -71,6 +77,20 @@ _SPLIT_PATTERNS: dict[ChunkingMode, re.Pattern[str]] = {
     ChunkingMode.PARAGRAPH: re.compile(r"\n\n+"),
 }
 
+
+class ChunkingStrategy(abc.ABC):
+    @abc.abstractmethod
+    def split(self, text: str) -> list[str]: ...
+
+
+class RegexChunking(ChunkingStrategy):
+    def __init__(self, mode: ChunkingMode):
+        self._pattern = _SPLIT_PATTERNS[mode]
+
+    def split(self, text: str) -> list[str]:
+        return self._pattern.split(text)
+
+
 _SENTINEL = None
 
 
@@ -85,7 +105,8 @@ async def _validate_chunk(
         qc_reqs: list[Requirement | str],
         backend: Backend,
         result: StreamChunkingResult,
-        on_failure: OnChunkFailure | None = None,
+        ctx: Context,
+        repair: ChunkRepair | None = None,
 ) -> tuple[bool, str]:
     """Validate a single chunk. Returns (passed, chunk_text)."""
     if not chunk.strip():
@@ -99,9 +120,9 @@ async def _validate_chunk(
     result.quick_check_results.append(chunk_results)
 
     if not all(chunk_results):
-        if on_failure is not None:
-            repaired = await on_failure(chunk, chunk_results, result)
-            if repaired is not None:
+        if repair is not None:
+            should_continue, repaired = await repair(chunk, ctx, qc_reqs, chunk_results)
+            if should_continue:
                 return True, repaired
         result.failed_chunk = chunk
         return False, chunk
@@ -115,9 +136,9 @@ async def stream_with_chunking(
         ctx: Context,
         *,
         quick_check_requirements: list[Requirement | str] | None = None,
-        chunking_mode: ChunkingMode = ChunkingMode.SENTENCE,
+        chunking: ChunkingMode | ChunkingStrategy = ChunkingMode.SENTENCE,
         model_options: dict | None = None,
-        on_chunk_failure: OnChunkFailure | None = None,
+        repair: ChunkRepair | None = None,
         quick_check_backend: Backend | None = None,
 ) -> StreamChunkingResult:
     """Stream LLM output, validating chunks against quick-check requirements.
@@ -137,7 +158,7 @@ async def stream_with_chunking(
             )
 
             qc_reqs: list[Requirement | str] = quick_check_requirements or []
-            pattern = _SPLIT_PATTERNS[chunking_mode]
+            chunker = RegexChunking(chunking) if isinstance(chunking, ChunkingMode) else chunking
             buffer = ""
 
             while not thunk.is_computed():
@@ -145,7 +166,7 @@ async def stream_with_chunking(
                 result.full_text += delta
 
                 buffer += delta
-                parts = pattern.split(buffer)
+                parts = chunker.split(buffer)
                 buffer = parts[-1]
 
                 for chunk in parts[:-1]:
@@ -154,7 +175,8 @@ async def stream_with_chunking(
                                                               qc_reqs,
                                                               quick_check_backend,
                                                               result,
-                                                              on_chunk_failure)
+                                                              ctx,
+                                                              repair)
                         if not passed:
                             result.completed = False
                             _cancel_thunk(thunk)
@@ -163,7 +185,7 @@ async def stream_with_chunking(
                     await result._chunk_queue.put(chunk)
 
             # Validate remaining buffer from the final text
-            final_parts = pattern.split(result.full_text)
+            final_parts = chunker.split(result.full_text)
             already_done = len(result.validated_chunks)
             for i in range(already_done, len(final_parts)):
                 chunk = final_parts[i]
@@ -172,7 +194,8 @@ async def stream_with_chunking(
                                                           qc_reqs,
                                                           quick_check_backend,
                                                           result,
-                                                          on_chunk_failure)
+                                                          ctx,
+                                                          repair)
                     if not passed:
                         result.completed = False
                         _cancel_thunk(thunk)
