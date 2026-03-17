@@ -29,7 +29,6 @@ from mellea_partial.chunking import (
     ChunkingStrategy,
     ChunkRepair,
     RegexChunking,
-    _SPLIT_PATTERNS,
 )
 
 if TYPE_CHECKING:

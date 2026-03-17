@@ -5,11 +5,15 @@ import re
 
 from mellea.backends import ModelOption
 from mellea.backends.ollama import OllamaModelBackend
+from mellea.core import Backend
 from mellea.core.requirement import Requirement
 from mellea.stdlib.components.instruction import Instruction
 from mellea.stdlib.requirements.requirement import simple_validate
 
+from mellea.stdlib.context import SimpleContext
+
 from mellea_partial import ChunkingMode, stream_with_chunking
+from mellea_partial.extras import LMStudioBackend
 
 
 def print_header(title: str) -> None:
@@ -39,7 +43,7 @@ def print_result(result) -> None:
             print(f"    - {bool(vr)}: {vr.reason or '(no reason)'}")
 
 
-async def demo_happy_path(backend: OllamaModelBackend) -> None:
+async def demo_happy_path(backend: Backend) -> None:
     print_header("Demo 1: Happy path — sentence chunking with code-based quick checks")
 
     instruction = Instruction(
@@ -58,8 +62,9 @@ async def demo_happy_path(backend: OllamaModelBackend) -> None:
     result = await stream_with_chunking(
         instruction,
         backend,
+        SimpleContext(),
         quick_check_requirements=quick_checks,
-        chunking_mode=ChunkingMode.SENTENCE,
+        chunking=ChunkingMode.SENTENCE,
     )
 
     async for chunk in result.astream():
@@ -68,7 +73,7 @@ async def demo_happy_path(backend: OllamaModelBackend) -> None:
     print_result(result)
 
 
-async def demo_fail_fast(backend: OllamaModelBackend) -> None:
+async def demo_fail_fast(backend: Backend) -> None:
     print_header("Demo 2: Fail-fast — code-based check catches violation mid-stream")
 
     instruction = Instruction(
@@ -86,15 +91,16 @@ async def demo_fail_fast(backend: OllamaModelBackend) -> None:
     result = await stream_with_chunking(
         instruction,
         backend,
+        SimpleContext(),
         quick_check_requirements=quick_checks,
-        chunking_mode=ChunkingMode.SENTENCE,
+        chunking=ChunkingMode.SENTENCE,
     )
     await result.acomplete()
 
     print_result(result)
 
 
-async def demo_repair(backend: OllamaModelBackend) -> None:
+async def demo_repair(backend: Backend) -> None:
     print_header("Demo 3: Repair — callback strips digits from failing chunks")
 
     instruction = Instruction(
@@ -109,17 +115,18 @@ async def demo_repair(backend: OllamaModelBackend) -> None:
         ),
     ]
 
-    async def repair_digits(chunk, results, stream_result):
-        repaired = re.sub(r"\d+\.\s*", "", chunk)
+    async def repair_digits(chunk, ctx, qc_reqs, results):
+        repaired = re.sub(r"\d+", "<number>", chunk)
         print(f"  [repair] stripped digits: {chunk.strip()[:40]!r} -> {repaired.strip()[:40]!r}")
-        return repaired
+        return (True, repaired)
 
     result = await stream_with_chunking(
         instruction,
         backend,
+        SimpleContext(),
         quick_check_requirements=quick_checks,
-        chunking_mode=ChunkingMode.SENTENCE,
-        on_chunk_failure=repair_digits,
+        chunking=ChunkingMode.SENTENCE,
+        quick_repair=repair_digits,
     )
 
     async for chunk in result.astream():
@@ -130,8 +137,10 @@ async def demo_repair(backend: OllamaModelBackend) -> None:
 
 
 async def main() -> None:
-    backend = OllamaModelBackend(model_options={ModelOption.STREAM: True})
-
+    backend = LMStudioBackend(
+        "granite-4.0-micro@q8_0",
+        model_options={ModelOption.STREAM: True},
+    )
     await demo_happy_path(backend)
     await demo_fail_fast(backend)
     await demo_repair(backend)

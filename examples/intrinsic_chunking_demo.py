@@ -14,7 +14,7 @@ from mellea.core.requirement import Requirement, ValidationResult
 from mellea.stdlib.components import Document
 from mellea.stdlib.components.instruction import Instruction
 from mellea.stdlib.components.intrinsic import rag
-from mellea.stdlib.context import ChatContext
+from mellea.stdlib.context import ChatContext, SimpleContext
 from mellea_partial.extras import LMStudioBackend, FixedDocument
 
 from mellea_partial import ChunkingMode, stream_with_chunking
@@ -93,8 +93,9 @@ async def demo_hallucination_check(
     result = await stream_with_chunking(
         instruction,
         gen_backend,
+        SimpleContext(),
         quick_check_requirements=quick_checks,
-        chunking_mode=ChunkingMode.SENTENCE,
+        chunking=ChunkingMode.SENTENCE,
     )
 
     async for chunk in result.astream():

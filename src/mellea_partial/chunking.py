@@ -195,7 +195,7 @@ async def stream_with_chunking(
                                                           quick_check_backend,
                                                           result,
                                                           ctx,
-                                                          repair)
+                                                          quick_repair)
                     if not passed:
                         result.completed = False
                         _cancel_thunk(thunk)
