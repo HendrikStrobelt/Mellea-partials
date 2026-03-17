@@ -106,7 +106,7 @@ async def _validate_chunk(
         backend: Backend,
         result: StreamChunkingResult,
         ctx: Context,
-        repair: ChunkRepair | None = None,
+        quick_repair: ChunkRepair | None = None,
 ) -> tuple[bool, str]:
     """Validate a single chunk. Returns (passed, chunk_text)."""
     if not chunk.strip():
@@ -120,8 +120,8 @@ async def _validate_chunk(
     result.quick_check_results.append(chunk_results)
 
     if not all(chunk_results):
-        if repair is not None:
-            should_continue, repaired = await repair(chunk, ctx, qc_reqs, chunk_results)
+        if quick_repair is not None:
+            should_continue, repaired = await quick_repair(chunk, ctx, qc_reqs, chunk_results)
             if should_continue:
                 return True, repaired
         result.failed_chunk = chunk
@@ -138,7 +138,7 @@ async def stream_with_chunking(
         quick_check_requirements: list[Requirement | str] | None = None,
         chunking: ChunkingMode | ChunkingStrategy = ChunkingMode.SENTENCE,
         model_options: dict | None = None,
-        repair: ChunkRepair | None = None,
+        quick_repair: ChunkRepair | None = None,
         quick_check_backend: Backend | None = None,
 ) -> StreamChunkingResult:
     """Stream LLM output, validating chunks against quick-check requirements.
@@ -176,7 +176,7 @@ async def stream_with_chunking(
                                                               quick_check_backend,
                                                               result,
                                                               ctx,
-                                                              repair)
+                                                              quick_repair)
                         if not passed:
                             result.completed = False
                             _cancel_thunk(thunk)

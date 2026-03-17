@@ -196,7 +196,7 @@ async def _validate_and_emit_chunk(
     backend: Backend,
     attempt_rec: AttemptRecord,
     result: StreamInstructResult,
-    repair: ChunkRepair | None,
+    quick_repair: ChunkRepair | None,
     ctx: object,
 ) -> tuple[bool, str]:
     """Validate *chunk* against quick-check requirements and emit the appropriate events.
@@ -224,8 +224,8 @@ async def _validate_and_emit_chunk(
     )
 
     if not passed:
-        if repair is not None:
-            should_continue, repaired = await repair(chunk, ctx, qc_reqs, chunk_results)
+        if quick_repair is not None:
+            should_continue, repaired = await quick_repair(chunk, ctx, qc_reqs, chunk_results)
             if should_continue:
                 await result._event_queue.put(
                     ChunkRepairedEvent(
@@ -251,7 +251,7 @@ async def _run(
     strategy: BaseSamplingStrategy | None,
     qc_reqs: list[Requirement | str],
     chunking: ChunkingMode | ChunkingStrategy,
-    repair: ChunkRepair | None,
+    quick_repair: ChunkRepair | None,
     model_options: dict | None,
     initial_context: object,
     session: "MelleaSession",
@@ -308,7 +308,7 @@ async def _run(
                     if qc_reqs:
                         passed, chunk = await _validate_and_emit_chunk(
                             chunk, chunk_index, attempt_idx, qc_reqs,
-                            backend, attempt_rec, result, repair, next_context,
+                            backend, attempt_rec, result, quick_repair, next_context,
                         )
                         if not passed:
                             quick_check_failed = True
@@ -332,7 +332,7 @@ async def _run(
                     if qc_reqs:
                         passed, chunk = await _validate_and_emit_chunk(
                             chunk, chunk_index, attempt_idx, qc_reqs,
-                            backend, attempt_rec, result, repair, next_context,
+                            backend, attempt_rec, result, quick_repair, next_context,
                         )
                         if not passed:
                             quick_check_failed = True
@@ -469,7 +469,7 @@ async def stream_instruct(
     images=None,
     strategy: BaseSamplingStrategy | None = None,
     chunking: ChunkingMode | ChunkingStrategy = ChunkingMode.SENTENCE,
-    repair: ChunkRepair | None = None,
+    quick_repair: ChunkRepair | None = None,
     model_options: dict | None = None,
 ) -> StreamInstructResult:
     """Stream LLM output with per-chunk quick checks and optional sampling strategies.
@@ -494,7 +494,7 @@ async def stream_instruct(
         strategy: Sampling strategy for retry/repair loops.  ``None`` means a single
             attempt with no full-output validation.
         chunking: How to split the stream into chunks (ChunkingMode enum or ChunkingStrategy).
-        repair: Optional callback invoked when a chunk fails quick checks.
+        quick_repair: Optional callback invoked when a chunk fails quick checks.
         model_options: Extra model options forwarded to the backend.
 
     Returns:
@@ -521,7 +521,7 @@ async def stream_instruct(
             strategy=strategy,
             qc_reqs=qc_reqs,
             chunking=chunking,
-            repair=repair,
+            quick_repair=quick_repair,
             model_options=model_options,
             initial_context=session.ctx,
             session=session,

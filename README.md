@@ -102,7 +102,7 @@ async def main():
                 check_only=True,
             ),
         ],
-        repair=strip_numbering,
+        quick_repair=strip_numbering,
         requirements=[
             Requirement(
                 "Must be exactly 3 lines.",

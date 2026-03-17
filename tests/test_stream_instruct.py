@@ -214,7 +214,7 @@ async def test_chunk_repair_callback():
     result = await m.stream_instruct(
         "Say something.",
         quick_check_requirements=[no_digit_req()],
-        repair=strip_digits,
+        quick_repair=strip_digits,
     )
 
     events = await collect_events(result)
@@ -407,7 +407,7 @@ async def test_chunk_repair_returns_false_stops_streaming():
     result = await m.stream_instruct(
         "Say something.",
         quick_check_requirements=[no_digit_req()],
-        repair=reject_chunk,
+        quick_repair=reject_chunk,
     )
 
     events = await collect_events(result)
