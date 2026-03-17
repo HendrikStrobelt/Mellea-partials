@@ -20,10 +20,11 @@ from mellea.stdlib.sampling import RejectionSamplingStrategy
 from mellea.stdlib.sampling.base import RepairTemplateStrategy
 from mellea.stdlib.session import MelleaSession
 
-import stream_instruct  # activates the powerup  # noqa: F401
-from stream_instruct import (
+from mellea_partial import (  # importing activates the powerup  # noqa: F401
     ChunkEvent,
     ChunkRepairedEvent,
+    ChunkingMode,
+    ChunkingStrategy,
     CompletedEvent,
     FullValidationEvent,
     QuickCheckEvent,
@@ -31,7 +32,6 @@ from stream_instruct import (
     StreamingDoneEvent,
     StreamInstructResult,
 )
-from stream_with_chunking import ChunkingMode, ChunkingStrategy
 
 
 # ─── StreamingMockBackend ────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ from mellea.core.requirement import Requirement
 from mellea.stdlib.components.instruction import Instruction
 from mellea.stdlib.requirements.requirement import simple_validate
 
-from stream_with_chunking import ChunkingMode, stream_with_chunking
+from mellea_partial import ChunkingMode, stream_with_chunking
 
 
 def print_header(title: str) -> None:

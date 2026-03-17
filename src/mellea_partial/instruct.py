@@ -24,7 +24,7 @@ from mellea.stdlib.functional import avalidate
 from mellea.stdlib.sampling import RejectionSamplingStrategy
 from mellea.stdlib.sampling.base import BaseSamplingStrategy
 
-from stream_with_chunking import (
+from mellea_partial.chunking import (
     ChunkingMode,
     ChunkingStrategy,
     ChunkRepair,

@@ -15,9 +15,9 @@ from mellea.stdlib.components import Document
 from mellea.stdlib.components.instruction import Instruction
 from mellea.stdlib.components.intrinsic import rag
 from mellea.stdlib.context import ChatContext
-from mellea_extra import LMStudioBackend, FixedDocument
+from mellea_partial.extras import LMStudioBackend, FixedDocument
 
-from stream_with_chunking import ChunkingMode, stream_with_chunking
+from mellea_partial import ChunkingMode, stream_with_chunking
 
 
 def print_header(title: str) -> None:

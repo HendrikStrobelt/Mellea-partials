@@ -3,7 +3,7 @@
 Requires Ollama running locally with a model available (e.g. llama3.2).
 
 Usage:
-    python stream_instruct_demo.py
+    uv run python examples/stream_instruct_demo.py
 """
 
 from __future__ import annotations
@@ -19,9 +19,9 @@ from mellea.stdlib.sampling import RejectionSamplingStrategy
 from mellea.stdlib.sampling.base import RepairTemplateStrategy
 from mellea.stdlib.session import MelleaSession
 
-import stream_instruct  # activates stream_instruct powerup on MelleaSession  # noqa: F401
-from mellea_extra import LMStudioBackend
-from stream_instruct import (
+import mellea_partial  # activates stream_instruct powerup on MelleaSession  # noqa: F401
+from mellea_partial.extras import LMStudioBackend
+from mellea_partial import (
     ChunkEvent,
     ChunkRepairedEvent,
     CompletedEvent,

@@ -5,6 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
+src/mellea_partial.egg-info/
 
 # Virtual environments
 .venv

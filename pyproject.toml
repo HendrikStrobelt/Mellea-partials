@@ -1,12 +1,29 @@
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "mellea-partial"
 version = "0.1.0"
-description = "Add your description here"
+description = "Streaming LLM output with chunk-by-chunk validation for Mellea"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "mellea[all]>=0.3.2",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
 [tool.uv.sources]
-mellea = { git = "https://github.com/generative-computing/mellea.git"}
+mellea = { git = "https://github.com/generative-computing/mellea.git" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "strict"

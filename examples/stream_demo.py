@@ -7,7 +7,7 @@ from mellea.core import CBlock
 from mellea.stdlib.components.instruction import Instruction
 from mellea.stdlib.context import SimpleContext
 
-from mellea_extra import LMStudioBackend
+from mellea_partial.extras import LMStudioBackend
 
 
 async def main():
